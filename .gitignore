@@ -288,9 +288,9 @@ __pycache__/
 *.xsd.cs
 
 # Unity libraries
-lib/UnityEngine.dll
-lib/UnityEngine.UI.dll
-lib/UnityEngine.CoreModule.dll
+lib/UnityEngine*
 
 #BepInEx libraries
-lib/BepInEx.dll
+lib/BepInEx*
+lib/Mono.Cecil*
+lib/MonoMod*

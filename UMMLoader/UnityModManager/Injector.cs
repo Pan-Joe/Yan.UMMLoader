@@ -1,72 +1,320 @@
-﻿using System.Text.RegularExpressions;
+﻿using System;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text.RegularExpressions;
+using UnityEngine;
+using Harmony12;
+using System.Linq;
 
 namespace UnityModManagerNet
 {
-	public static class Injector
-	{
-		private static readonly Regex EntryPointPattern = new Regex(@"(?:(?<=\[)(?'assembly'.+(?>\.dll))(?=\]))|(?:(?'class'[\w|\.]+)(?=\.))|(?:(?<=\.)(?'func'\w+))|(?:(?<=\:)(?'mod'\w+))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    //[ComVisible(true)]
+    //public class RngWrapper : RandomNumberGenerator
+    //{
+    //    readonly RNGCryptoServiceProvider _wrapped;
 
-		internal static bool TryParseEntryPoint(string str, out string assembly, out string @class, out string method, out string insertionPlace)
-		{
-			assembly = string.Empty;
-			@class = string.Empty;
-			method = string.Empty;
-			insertionPlace = string.Empty;
+    //    static RngWrapper()
+    //    {
+    //        Injector.Run();
+    //    }
 
-			var matches = EntryPointPattern.Matches(str);
-			var groupNames = EntryPointPattern.GetGroupNames();
+    //    public RngWrapper()
+    //    {
+    //        this._wrapped = new RNGCryptoServiceProvider();
+    //    }
 
-			if (matches.Count > 0)
-				foreach (Match match in matches)
-				{
-					foreach (string group in groupNames)
-						if (match.Groups[group].Success)
-							switch (group)
-							{
-								case "assembly":
-									assembly = match.Groups[group].Value;
-									break;
-								case "class":
-									@class = match.Groups[group].Value;
-									break;
-								case "func":
-									method = match.Groups[group].Value;
-									if (method == "ctor" || method == "cctor")
-										method = $".{method}";
-									break;
-								case "mod":
-									insertionPlace = match.Groups[group].Value.ToLower();
-									break;
-							}
-				}
+    //    public RngWrapper(string str)
+    //    {
+    //        this._wrapped = new RNGCryptoServiceProvider(str);
+    //    }
 
-			var hasError = false;
+    //    public RngWrapper(byte[] rgb)
+    //    {
+    //        this._wrapped = new RNGCryptoServiceProvider(rgb);
+    //    }
 
-			if (string.IsNullOrEmpty(assembly))
-			{
-				hasError = true;
-				UnityModManager.Logger.Error("Assembly name not found.");
-			}
+    //    public RngWrapper(CspParameters cspParams)
+    //    {
+    //        this._wrapped = new RNGCryptoServiceProvider(cspParams);
+    //    }
 
-			if (string.IsNullOrEmpty(@class))
-			{
-				hasError = true;
-				UnityModManager.Logger.Error("Class name not found.");
-			}
+    //    public override void GetBytes(byte[] data)
+    //    {
+    //        this._wrapped.GetBytes(data);
+    //    }
 
-			if (string.IsNullOrEmpty(method))
-			{
-				hasError = true;
-				UnityModManager.Logger.Error("Method name not found.");
-			}
+    //    public override void GetNonZeroBytes(byte[] data)
+    //    {
+    //        this._wrapped.GetNonZeroBytes(data);
+    //    }
+    //}
 
-			if (hasError)
-			{
-				UnityModManager.Logger.Error($"Error parsing EntryPoint '{str}'.");
-				return false;
-			}
+    public class Injector
+    {
+        static bool usePrefix = false;
 
-			return true;
-		}
-	}
+        public static void Run(bool doorstop = false)
+        {
+            try
+            {
+                _Run(doorstop);
+            }
+            catch (Exception e)
+            {
+                Debug.LogException(e);
+                UnityModManager.OpenUnityFileLog();
+            }
+        }
+
+        private static void _Run(bool doorstop)
+        {
+            var stringFields = typeof(UnityModManager.Textures).GetFields(BindingFlags.Static | BindingFlags.NonPublic).Where(x => x.FieldType == typeof(string)).ToArray();
+            var textureFields = typeof(UnityModManager.Textures).GetFields(BindingFlags.Static | BindingFlags.Public).Where(x => x.FieldType == typeof(Texture2D)).ToArray();
+            foreach (var f in textureFields)
+            {
+                f.SetValue(null, new Texture2D(2, 2, TextureFormat.ARGB32, false, true));
+            }
+
+            Console.WriteLine();
+            Console.WriteLine();
+            UnityModManager.Logger.Log("Injection...");
+
+            if (!UnityModManager.Initialize())
+            {
+                UnityModManager.Logger.Log($"Cancel start due to an error.");
+                UnityModManager.OpenUnityFileLog();
+                return;
+            }
+
+            Fixes.Apply();
+
+            if (UnityModManager.unityVersion.Major >= 2017)
+            {
+                var assembly = Assembly.Load("UnityEngine.ImageConversionModule");
+                var LoadImage = assembly.GetType("UnityEngine.ImageConversion").GetMethod("LoadImage", new Type[] { typeof(Texture2D), typeof(byte[]) });
+                if (LoadImage != null)
+                {
+                    foreach (var f in textureFields)
+                    {
+                        LoadImage.Invoke(null, new object[] { (Texture2D)f.GetValue(null), Convert.FromBase64String((string)stringFields.FirstOrDefault(x => x.Name == f.Name + "Base64")?.GetValue(null) ?? "") });
+                    }
+                }
+            }
+            else
+            {
+                var LoadImage = typeof(Texture2D).GetMethod("LoadImage", new Type[] { typeof(byte[]) });
+                if (LoadImage != null)
+                {
+                    foreach (var f in textureFields)
+                    {
+                        LoadImage.Invoke((Texture2D)f.GetValue(null), new object[] { Convert.FromBase64String((string)stringFields.FirstOrDefault(x => x.Name == f.Name + "Base64")?.GetValue(null) ?? "") });
+                    }
+                }
+            }
+            foreach (var f in textureFields)
+            {
+                UMMLoader.UMMLoader.Logger.LogMessage(f.Name + " : " + ((Texture2D)f.GetValue(null) == null).ToString());
+            }
+
+
+
+            if (!string.IsNullOrEmpty(UnityModManager.Config.StartingPoint))
+            {
+                if (!doorstop && UnityModManager.Config.StartingPoint == UnityModManager.Config.EntryPoint)
+                {
+                    UnityModManager.Start();
+                }
+                else
+                {
+                    if (TryGetEntryPoint(UnityModManager.Config.StartingPoint, out var @class, out var method, out var place))
+                    {
+                        usePrefix = (place == "before");
+                        var harmony = HarmonyInstance.Create(nameof(UnityModManager));
+                        var prefix = typeof(Injector).GetMethod(nameof(Prefix_Start), BindingFlags.Static | BindingFlags.NonPublic);
+                        var postfix = typeof(Injector).GetMethod(nameof(Postfix_Start), BindingFlags.Static | BindingFlags.NonPublic);
+                        harmony.Patch(method, new HarmonyMethod(prefix), new HarmonyMethod(postfix));
+                        UnityModManager.Logger.Log("Injection successful.");
+                    }
+                    else
+                    {
+                        UnityModManager.Logger.Log("Injection canceled.");
+                        UnityModManager.OpenUnityFileLog();
+                        return;
+                    }
+                }
+            }
+            else
+            {
+                UnityModManager.Start();
+            }
+
+            if (!string.IsNullOrEmpty(UnityModManager.Config.UIStartingPoint))
+            {
+                if (TryGetEntryPoint(UnityModManager.Config.UIStartingPoint, out var @class, out var method, out var place))
+                {
+                    usePrefix = (place == "before");
+                    var harmony = HarmonyInstance.Create(nameof(UnityModManager));
+                    var prefix = typeof(Injector).GetMethod(nameof(Prefix_Show), BindingFlags.Static | BindingFlags.NonPublic);
+                    var postfix = typeof(Injector).GetMethod(nameof(Postfix_Show), BindingFlags.Static | BindingFlags.NonPublic);
+                    harmony.Patch(method, new HarmonyMethod(prefix), new HarmonyMethod(postfix));
+                }
+                else
+                {
+                    UnityModManager.OpenUnityFileLog();
+                    return;
+                }
+            }
+            else if (UnityModManager.UI.Instance)
+            {
+                UnityModManager.UI.Instance.FirstLaunch();
+            }
+        }
+
+        static void Prefix_Start()
+        {
+            if (usePrefix)
+                UnityModManager.Start();
+        }
+
+        static void Postfix_Start()
+        {
+            if (!usePrefix)
+                UnityModManager.Start();
+        }
+
+        static void Prefix_Show()
+        {
+            if (usePrefix && UnityModManager.UI.Instance)
+                UnityModManager.UI.Instance.FirstLaunch();
+        }
+
+        static void Postfix_Show()
+        {
+            if (!usePrefix && UnityModManager.UI.Instance)
+                UnityModManager.UI.Instance.FirstLaunch();
+        }
+
+        internal static bool TryGetEntryPoint(string str, out Type foundClass, out MethodInfo foundMethod, out string insertionPlace)
+        {
+            foundClass = null;
+            foundMethod = null;
+            insertionPlace = null;
+
+            if (TryParseEntryPoint(str, out string assemblyName, out _, out _, out _))
+            {
+                foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    if (assembly.ManifestModule.Name == assemblyName)
+                    {
+                        return TryGetEntryPoint(assembly, str, out foundClass, out foundMethod, out insertionPlace);
+                    }
+                }
+                UnityModManager.Logger.Error($"Assembly '{assemblyName}' not found.");
+
+                return false;
+            }
+
+            return false;
+        }
+
+        internal static bool TryGetEntryPoint(Assembly assembly, string str, out Type foundClass, out MethodInfo foundMethod, out string insertionPlace)
+        {
+            foundClass = null;
+            foundMethod = null;
+
+            if (!TryParseEntryPoint(str, out _, out var className, out var methodName, out insertionPlace))
+            {
+                return false;
+            }
+
+            foundClass = assembly.GetType(className);
+            if (foundClass == null)
+            {
+                UnityModManager.Logger.Error($"Class '{className}' not found.");
+                return false;
+            }
+
+            foundMethod = foundClass.GetMethod(methodName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
+            if (foundMethod == null)
+            {
+                UnityModManager.Logger.Error($"Method '{methodName}' not found.");
+                return false;
+            }
+
+            return true;
+        }
+
+        internal static bool TryParseEntryPoint(string str, out string assembly, out string @class, out string method, out string insertionPlace)
+        {
+            assembly = string.Empty;
+            @class = string.Empty;
+            method = string.Empty;
+            insertionPlace = string.Empty;
+
+            var regex = new Regex(@"(?:(?<=\[)(?'assembly'.+(?>\.dll))(?=\]))|(?:(?'class'[\w|\.]+)(?=\.))|(?:(?<=\.)(?'func'\w+))|(?:(?<=\:)(?'mod'\w+))", RegexOptions.IgnoreCase);
+            var matches = regex.Matches(str);
+            var groupNames = regex.GetGroupNames();
+
+            if (matches.Count > 0)
+            {
+                foreach (Match match in matches)
+                {
+                    foreach (var group in groupNames)
+                    {
+                        if (match.Groups[group].Success)
+                        {
+                            switch (group)
+                            {
+                                case "assembly":
+                                    assembly = match.Groups[group].Value;
+                                    break;
+                                case "class":
+                                    @class = match.Groups[group].Value;
+                                    break;
+                                case "func":
+                                    method = match.Groups[group].Value;
+                                    if (method == "ctor")
+                                        method = ".ctor";
+                                    else if (method == "cctor")
+                                        method = ".cctor";
+                                    break;
+                                case "mod":
+                                    insertionPlace = match.Groups[group].Value.ToLower();
+                                    break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            var hasError = false;
+
+            if (string.IsNullOrEmpty(assembly))
+            {
+                hasError = true;
+                UnityModManager.Logger.Error("Assembly name not found.");
+            }
+
+            if (string.IsNullOrEmpty(@class))
+            {
+                hasError = true;
+                UnityModManager.Logger.Error("Class name not found.");
+            }
+
+            if (string.IsNullOrEmpty(method))
+            {
+                hasError = true;
+                UnityModManager.Logger.Error("Method name not found.");
+            }
+
+            if (hasError)
+            {
+                UnityModManager.Logger.Error($"Error parsing EntryPoint '{str}'.");
+                return false;
+            }
+
+            return true;
+        }
+    }
 }
