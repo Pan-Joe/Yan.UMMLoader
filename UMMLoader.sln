@@ -1,9 +1,9 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 15
-VisualStudioVersion = 15.0.28307.168
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.29806.167
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UMMLoader", "UMMLoader\UMMLoader.csproj", "{B71775C4-14DC-4AB2-9C19-B9FBAD65AF1A}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UMMLoader", "UMMLoader.csproj", "{B71775C4-14DC-4AB2-9C19-B9FBAD65AF1A}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -20,6 +20,6 @@ Global
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
-		SolutionGuid = {D0A018B0-7B5C-4B76-8780-81EB23863CDC}
+		SolutionGuid = {0C024D73-8C89-40D0-A22F-E4D24D909199}
 	EndGlobalSection
 EndGlobal
